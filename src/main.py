@@ -6,15 +6,13 @@ import plotly.express as px
 import tempfile
 from datetime import datetime, timedelta
 
-# Set up Streamlit page config with custom theme
 st.set_page_config(
     page_title="Open Source CPAP Data Visualizer",
-    page_icon="icon.png",
+    page_icon="images/icon.png",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS to style the app
 st.markdown("""
     <style>
     .main {
@@ -45,13 +43,22 @@ st.markdown("""
         font-size: 18px !important;
         color: #004d40 !important;
     }
+    .css-1d391kg {
+        background-color: white !important;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+    }
+    .css-1d391kg .stTable, .css-1d391kg .stDataFrame {
+        background-color: white !important;
+        border: 1px solid #ddd !important;
+        padding: 8px !important;
+    }
     </style>
     """, unsafe_allow_html=True)
 
-# Sidebar with logo and file uploader
-st.sidebar.image("logo.png", use_column_width=True)
+st.sidebar.image("images/logo.png", use_column_width=True)
 
-# Sidebar option to select the data source
 data_source = st.sidebar.selectbox(
     "Select Data Source",
     ["Upload EDF File", "Load from AirSense 11 Memory Card"]
@@ -77,7 +84,6 @@ elif data_source == "Load from AirSense 11 Memory Card":
             st.warning("No EDF files found in the specified directory.")
 
 if temp_file_path:
-    # Load the EDF file and extract data
     def load_metadata(file_path):
         edf = pyedflib.EdfReader(file_path)
         header = edf.getHeader()
@@ -87,14 +93,12 @@ if temp_file_path:
     
     header, signals = load_metadata(temp_file_path)
     
-    # Detect machine type from the header (if available)
     machine_type = header.get("device", "Unknown Device")
     if machine_type == "Unknown Device":
         st.sidebar.write("Detected Machine: Unknown Device (Defaulting to ResMed AirSense 11)")
     else:
         st.sidebar.write(f"Detected Machine: {machine_type}")
     
-    # Signal selection defaults
     def get_default_signals(machine_type, signals):
         defaults = {
             "ResMed AirSense 11": {"AHI": "AHI", "MaskPress.95": "MaskPress.95"},
@@ -109,13 +113,10 @@ if temp_file_path:
         return ahi_signal, pressure_signal
 
     default_ahi_signal, default_pressure_signal = get_default_signals(machine_type, signals)
-    
-    # Dynamic signal selection with defaults, allowing users to override
     ahi_signal = st.sidebar.selectbox("Select AHI Signal", signals, index=signals.index(default_ahi_signal) if default_ahi_signal else 0)
     pressure_signal = st.sidebar.selectbox("Select Pressure Signal (MaskPress.95)", signals, index=signals.index(default_pressure_signal) if default_pressure_signal else 0)
     
     if ahi_signal and pressure_signal:
-        # Load selected data
         def load_data(file_path, signal_name):
             edf = pyedflib.EdfReader(file_path)
             signal_index = edf.getSignalLabels().index(signal_name)
@@ -130,47 +131,29 @@ if temp_file_path:
         df_ahi = load_data(temp_file_path, ahi_signal)
         df_pressure = load_data(temp_file_path, pressure_signal)
         
-        # Merge data on time
         df = pd.merge(df_ahi, df_pressure, on='Time')
         df.set_index('Time', inplace=True)
         
-        # Resampling interval selection
-        resampling_options = {
-            'Daily': 'D',
-            'Every 3 Days': '3D',
-            'Weekly': 'W',
-            'Every 2 Weeks': '2W',
-            'Monthly': 'M'
-        }
-        resample_interval = st.sidebar.selectbox("Select Resampling Interval", list(resampling_options.keys()), index=0)
-        resample_rule = resampling_options[resample_interval]
+        daily_data = df.resample('D').mean()
+        daily_data['Recommended Pressure'] = daily_data[pressure_signal].resample('W-SUN').transform('mean').round(1)
         
-        # Resample data
-        daily_data = df.resample(resample_rule).mean()
-        
-        # Calculate the recommended pressure as a weekly average
-        daily_data['Recommended Pressure'] = daily_data[pressure_signal].resample('W-SUN').transform('mean')
-        
-        # Plot 1: Recorded AHI
-        fig_ahi = px.line(daily_data, x=daily_data.index, y=ahi_signal, title=f"Recorded AHI by {resample_interval}")
+        fig_ahi = px.line(daily_data.tail(7), x=daily_data.tail(7).index, y=ahi_signal, title="Recorded AHI (Last 7 Days)")
         fig_ahi.update_xaxes(tickformat="%b %d", title_text="Day")
         fig_ahi.update_yaxes(title_text="Recorded AHI")
         fig_ahi.add_hline(y=5, line_dash="dash", annotation_text="AHI Threshold (5)", line_color="red")
         st.plotly_chart(fig_ahi, use_container_width=True)
         
-        # Plot 2: Recorded Pressure (MaskPress.95)
-        fig_pressure = px.line(daily_data, x=daily_data.index, y=pressure_signal, title=f"Recorded Pressure (MaskPress.95) by {resample_interval}")
+        fig_pressure = px.line(daily_data.tail(7), x=daily_data.tail(7).index, y=pressure_signal, title="Recorded Pressure (Last 7 Days)")
         fig_pressure.update_xaxes(tickformat="%b %d", title_text="Day")
         fig_pressure.update_yaxes(title_text="Recorded Pressure (cmH2O)")
         st.plotly_chart(fig_pressure, use_container_width=True)
         
-        # Plot 3: Recommended Mask Pressure (Weekly Average)
-        fig_recommended = px.line(daily_data, x=daily_data.index, y='Recommended Pressure', title=f"Recommended Mask Pressure (Weekly Average) by {resample_interval}")
-        fig_recommended.update_xaxes(tickformat="%b %d", title_text="Day")
-        fig_recommended.update_yaxes(title_text="Recommended Pressure (cmH2O)")
-        st.plotly_chart(fig_recommended, use_container_width=True)
-        
-        # Export options
+        weekly_recommended = daily_data['Recommended Pressure'].resample('W-SUN').mean()  # Get weekly averages
+        weekly_recommended_table = pd.DataFrame({
+            'Week Start': weekly_recommended.index.date,
+            'Recommended Pressure': [f"{pressure:.1f}" for pressure in weekly_recommended.values]
+        })
+        recommended_pressure = st.dataframe(weekly_recommended_table, hide_index=True)
         st.download_button(label="Download Data as CSV", data=daily_data.to_csv(), file_name="cpap_analysis.csv")
     
     else:
