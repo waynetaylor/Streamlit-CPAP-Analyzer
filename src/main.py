@@ -136,14 +136,16 @@ if temp_file_path:
         
         daily_data = df.resample('D').mean()
         daily_data['Recommended Pressure'] = daily_data[pressure_signal].resample('W-SUN').transform('mean').round(1)
-        
-        fig_ahi = px.line(daily_data.tail(7), x=daily_data.tail(7).index, y=ahi_signal, title="Recorded AHI (Last 7 Days)")
+
+        st.markdown("## AHI over last 7 days")
+        fig_ahi = px.line(daily_data.tail(7), x=daily_data.tail(7).index, y=ahi_signal)
         fig_ahi.update_xaxes(tickformat="%b %d", title_text="Day")
         fig_ahi.update_yaxes(title_text="Recorded AHI")
         fig_ahi.add_hline(y=5, line_dash="dash", annotation_text="AHI Threshold (5)", line_color="red")
         st.plotly_chart(fig_ahi, use_container_width=True)
         
-        fig_pressure = px.line(daily_data.tail(7), x=daily_data.tail(7).index, y=pressure_signal, title="Recorded Pressure (Last 7 Days)")
+        st.markdown("## Recorded Pressure over last 7 days")
+        fig_pressure = px.line(daily_data.tail(7), x=daily_data.tail(7).index, y=pressure_signal)
         fig_pressure.update_xaxes(tickformat="%b %d", title_text="Day")
         fig_pressure.update_yaxes(title_text="Recorded Pressure (cmH2O)")
         st.plotly_chart(fig_pressure, use_container_width=True)
@@ -153,7 +155,13 @@ if temp_file_path:
             'Week Start': weekly_recommended.index.date,
             'Recommended Pressure': [f"{pressure:.1f}" for pressure in weekly_recommended.values]
         })
-        recommended_pressure = st.dataframe(weekly_recommended_table, hide_index=True)
+        weekly_recommended_table['Change from Previous Week'] = (weekly_recommended_table['Recommended Pressure'].astype(float).diff() / weekly_recommended_table['Recommended Pressure'].astype(float).shift(1) * 100).fillna(0).round(1)
+        weekly_recommended_table['Change from Previous Week'] = weekly_recommended_table['Change from Previous Week'].astype(str) + '%'  # Add percentage symbol
+        st.markdown("## Recommended Pressure Settings Over Time")
+        recommended_pressure = st.dataframe(weekly_recommended_table.style.apply(
+            lambda x: ['color: black' if x.name == 0 else ('color: red' if float(x['Change from Previous Week'].strip('%')) > 0 else 'color: green') for i in x],
+            axis=1
+        ), hide_index=True, use_container_width=True)
         st.download_button(label="Download Data as CSV", data=daily_data.to_csv(), file_name="cpap_analysis.csv")
     
     else:
