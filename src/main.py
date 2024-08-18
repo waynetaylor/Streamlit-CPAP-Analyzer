@@ -66,6 +66,16 @@ data_source = st.sidebar.selectbox(
 
 temp_file_path = None
 
+# Display the "Understanding AHI" and "Understanding MaskPress.95" info at the top
+st.info("""
+**Understanding AHI:**  
+- AHI (Apnea-Hypopnea Index) measures the number of apneas and hypopneas per hour of sleep. An AHI below 5 is considered normal.
+- **Threshold:** The dashed red line at AHI=5 marks the upper limit of the normal range.
+
+**Understanding MaskPress.95:**  
+- The MaskPress.95 signal represents the 95th percentile of the pressure applied by the CPAP machine. It's a useful indicator of pressure trends over time.
+""")
+
 if data_source == "Upload EDF File":
     uploaded_file = st.sidebar.file_uploader("Upload CPAP Data File", type=["edf"])
     if uploaded_file is not None:
