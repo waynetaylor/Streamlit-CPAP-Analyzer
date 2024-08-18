@@ -1,10 +1,14 @@
+"""
+Purpose: Open Source CPAP Data Visualizer
+Creator: Wayne Taylor
+"""
 import os
+import tempfile
+from datetime import datetime, timedelta
 import streamlit as st
 import pyedflib
 import pandas as pd
 import plotly.express as px
-import tempfile
-from datetime import datetime, timedelta
 
 st.set_page_config(
     page_title="Open Source CPAP Data Visualizer",
@@ -64,7 +68,7 @@ data_source = st.sidebar.selectbox(
     ["Upload EDF File", "Load from AirSense 11 Memory Card"]
 )
 
-temp_file_path = None
+TEMP_FILE_PATH = None
 
 # Display the "Understanding AHI" and "Understanding MaskPress.95" info at the top
 st.info("""
@@ -81,7 +85,7 @@ if data_source == "Upload EDF File":
     if uploaded_file is not None:
         with tempfile.NamedTemporaryFile(delete=False) as temp_file:
             temp_file.write(uploaded_file.getbuffer())
-            temp_file_path = temp_file.name
+            TEMP_FILE_PATH = temp_file.name
 
 elif data_source == "Load from AirSense 11 Memory Card":
     memory_card_directory = st.sidebar.text_input("Enter the path to the memory card directory")
@@ -89,26 +93,23 @@ elif data_source == "Load from AirSense 11 Memory Card":
         edf_files = [f for f in os.listdir(memory_card_directory) if f.endswith('.edf')]
         if edf_files:
             selected_edf = st.sidebar.selectbox("Select EDF File", edf_files)
-            temp_file_path = os.path.join(memory_card_directory, selected_edf)
+            TEMP_FILE_PATH = os.path.join(memory_card_directory, selected_edf)
         else:
             st.warning("No EDF files found in the specified directory.")
 
-if temp_file_path:
+if TEMP_FILE_PATH:
     def load_metadata(file_path):
         edf = pyedflib.EdfReader(file_path)
         header = edf.getHeader()
         signals = edf.getSignalLabels()
         edf.close()
         return header, signals
-    
-    header, signals = load_metadata(temp_file_path)
-    
+    header, signals = load_metadata(TEMP_FILE_PATH)
     machine_type = header.get("device", "Unknown Device")
     if machine_type == "Unknown Device":
         st.sidebar.write("Detected Machine: Unknown Device (Defaulting to ResMed AirSense 11)")
     else:
         st.sidebar.write(f"Detected Machine: {machine_type}")
-    
     def get_default_signals(machine_type, signals):
         defaults = {
             "ResMed AirSense 11": {"AHI": "AHI", "MaskPress.95": "MaskPress.95"},
@@ -125,7 +126,6 @@ if temp_file_path:
     default_ahi_signal, default_pressure_signal = get_default_signals(machine_type, signals)
     ahi_signal = st.sidebar.selectbox("Select AHI Signal", signals, index=signals.index(default_ahi_signal) if default_ahi_signal else 0)
     pressure_signal = st.sidebar.selectbox("Select Pressure Signal (MaskPress.95)", signals, index=signals.index(default_pressure_signal) if default_pressure_signal else 0)
-    
     if ahi_signal and pressure_signal:
         def load_data(file_path, signal_name):
             edf = pyedflib.EdfReader(file_path)
@@ -137,13 +137,10 @@ if temp_file_path:
             time_axis = [datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S") + timedelta(seconds=i/sample_rate) for i in range(num_samples)]
             edf.close()
             return pd.DataFrame({'Time': time_axis, signal_name: signal})
-        
-        df_ahi = load_data(temp_file_path, ahi_signal)
-        df_pressure = load_data(temp_file_path, pressure_signal)
-        
+        df_ahi = load_data(TEMP_FILE_PATH, ahi_signal)
+        df_pressure = load_data(TEMP_FILE_PATH, pressure_signal)
         df = pd.merge(df_ahi, df_pressure, on='Time')
         df.set_index('Time', inplace=True)
-        
         daily_data = df.resample('D').mean()
         daily_data['Recommended Pressure'] = daily_data[pressure_signal].resample('W-SUN').transform('mean').round(1)
 
@@ -153,13 +150,11 @@ if temp_file_path:
         fig_ahi.update_yaxes(title_text="Recorded AHI")
         fig_ahi.add_hline(y=5, line_dash="dash", annotation_text="AHI Threshold (5)", line_color="red")
         st.plotly_chart(fig_ahi, use_container_width=True)
-        
         st.markdown("## Recorded Pressure over last 7 days")
         fig_pressure = px.line(daily_data.tail(7), x=daily_data.tail(7).index, y=pressure_signal)
         fig_pressure.update_xaxes(tickformat="%b %d", title_text="Day")
         fig_pressure.update_yaxes(title_text="Recorded Pressure (cmH2O)")
         st.plotly_chart(fig_pressure, use_container_width=True)
-        
         weekly_recommended = daily_data['Recommended Pressure'].resample('W-SUN').mean()  # Get weekly averages
         weekly_recommended_table = pd.DataFrame({
             'Week Start': weekly_recommended.index.date,
@@ -173,7 +168,6 @@ if temp_file_path:
             axis=1
         ), hide_index=True, use_container_width=True)
         st.download_button(label="Download Data as CSV", data=daily_data.to_csv(), file_name="cpap_analysis.csv")
-    
     else:
         st.warning("Please select valid signals for AHI and MaskPress.95.")
 else:
